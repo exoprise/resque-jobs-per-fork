@@ -35,15 +35,25 @@ module Resque
   class Worker
 
     def perform_with_jobs_per_fork(job)
-      raise "You need to set JOBS_PER_FORK on the command line" unless ENV['JOBS_PER_FORK']
+      raise "You need to set JOBS_PER_FORK on the command line" unless (jobs_per_fork = ENV['JOBS_PER_FORK'])
+      jobs_per_fork = jobs_per_fork.to_i
+      sleeps_allowed = ENV['JOBS_PER_FORK_SLEEPS'].to_i
+      sleeps_taken = 0
+      # INTERVAL is already used by mongo-resque
+      sleep_interval = Float(ENV['INTERVAL'] || 5.0)
       run_hook :before_perform_jobs_per_fork, self
       jobs_performed ||= 0
-      while jobs_performed < ENV['JOBS_PER_FORK'].to_i do
+      while jobs_performed < jobs_per_fork do
         break if @shutdown
         if jobs_performed == 0
           perform_without_jobs_per_fork(job)
         elsif another_job = reserve
+          sleeps_taken = 0
           perform_without_jobs_per_fork(another_job)
+        elsif sleeps_taken < sleeps_allowed
+          sleeps_taken += 1
+          sleep(sleep_interval)
+          next
         else
           break # to prevent looping/hammering Redis with LPOPs
         end
